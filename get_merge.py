@@ -1,13 +1,15 @@
 # Se importan las librerías necesarias
+import os
 from google.cloud import bigquery
 
 # Set up BigQuery client
 client = bigquery.Client()
 
+
 # Las variables  raw_table_name y base_table tienen el mismo valor, pero se manejó así para más claridad en lo que se ocupan
-raw_table_name = 'dhw-gmarti-prd.BQ_PS4.acdoca'
-base_table = 'dhw-gmarti-prd.BQ_PS4.acdoca'
-target_table = 'dhw-gmarti-prd.CDC_PS4.acdoca'
+raw_table_name = 'dhw-gmarti-prd.BQ_PS4.ekko'
+base_table = 'dhw-gmarti-prd.BQ_PS4.ekko'
+target_table = 'dhw-gmarti-prd.CDC_PS4.ekko'
 
 # La siguiente función devuelve los campos llave comprandose, por ejemplo : `MANDT` = T1.`MANDT` AND S1.`EBELN` = T1.`EBELN`
 def get_key_comparator(table_prefix, keys):
@@ -68,28 +70,18 @@ p_key_sub_query=p_key_sub_query
 # base_table_columns = [field.name for field in client.get_table(base_table).schema]
 
 # La variable template contiene toda la consulta, solo le pasamos las variables
-template = f"""--  Copyright 2021 Google Inc.
-
---  Licensed under the Apache License, Version 2.0 (the "License");
---  you may not use this file except in compliance with the License.
---  You may obtain a copy of the License at
-
---      http://www.apache.org/licenses/LICENSE-2.0
-
---  Unless required by applicable law or agreed to in writing, software
---  distributed under the License is distributed on an "AS IS" BASIS,
---  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
---  See the License for the specific language governing permissions and
---  limitations under the License.
-
+template = f"""-- Se declara una variable para obtener el último recordstamp de la tabla destino
+DECLARE v_max_recordstamp timestamp;
+SET v_max_recordstamp = (
+SELECT IFNULL(MAX(recordstamp), TIMESTAMP('1940-12-25 05:30:00+00'))
+FROM `{target_table}`);
+--Comienza el merge
 MERGE `{target_table}` AS T
 USING (
   WITH
     S0 AS (
       SELECT * FROM `{base_table}`
-      WHERE recordstamp >= (
-        SELECT IFNULL(MAX(recordstamp), TIMESTAMP('1940-12-25 05:30:00+00'))
-        FROM `{target_table}`)
+      WHERE DATE(recordstamp) >= CURRENT_DATE() AND recordstamp >= v_max_recordstamp -- En la primera ejecución quitar lo siguiente de esta línea DATE(recordstamp) >= CURRENT_DATE() AND
     ),
     -- To handle occasional dups from SLT connector
     S1 AS (
@@ -103,9 +95,7 @@ USING (
     T1 AS (
       SELECT {keys}, MAX(recordstamp) AS recordstamp
       FROM `{base_table}`
-      WHERE recordstamp >= (
-        SELECT IFNULL(MAX(recordstamp), TIMESTAMP('1940-12-25 05:30:00+00'))
-        FROM `{target_table}`)
+      WHERE DATE(recordstamp) >= CURRENT_DATE() AND recordstamp >= v_max_recordstamp -- En la primera ejecución quitar lo siguiente de esta línea DATE(recordstamp) >= CURRENT_DATE() AND
       GROUP BY {keys}
     )
   SELECT S1.*
@@ -128,4 +118,7 @@ WHEN MATCHED AND S.operation_flag = 'U' THEN
 
 # Print the filled template
 
-print(template)
+# print(template)
+file = open(f"Funciones/merge_{target_table[23:]}.sql", "w")
+file.write(template)
+file.close()
